@@ -2,7 +2,7 @@ import { config } from "../../config";
 import { RunStrategy, IRunStrategyResult, ILoadResult } from "./RunStrategy";
 import { BrowserContext, Page, CDPSession } from "puppeteer";
 import { events, IData, IMetrics } from "../events";
-import { sleep } from "../../utils/utils";
+import { convertToDateString, sleep } from "../../utils/utils";
 import { normalizeString } from "../../utils/string";
 import { IQuery } from "../query";
 import { logger } from "../../logger/logger";
@@ -15,9 +15,10 @@ export const selectors = {
     link: 'a.job-card-container__link',
     applyBtn: 'button.jobs-apply-button[role="link"]',
     title: '.artdeco-entity-lockup__title',
-    company: '.job-card-container__primary-description', // was '.job-card-container__company-name'
+    company: ['.job-card-container__company-name', '.job-card-container__primary-description'],
     place: '.artdeco-entity-lockup__caption',
     date: 'time',
+    dateAgo: '.jobs-unified-top-card__posted-date',
     description: '.jobs-description',
     detailsPanel: '.jobs-search__job-details--container',
     detailsTop: '.jobs-details-top-card',
@@ -103,32 +104,27 @@ export class AuthenticatedStrategy extends RunStrategy {
         const pollingTime = 50;
         let elapsed = 0;
         let loaded = false;
-
         await sleep(pollingTime);
-
         try {
             while (elapsed < timeout) {
                 loaded = await page.evaluate(
                     (jobId, panelSelector, descriptionSelector) => {
                         const detailsPanel = document.querySelector(panelSelector) as HTMLElement;
+                        if (!detailsPanel) return false;
                         const description = document.querySelector(descriptionSelector) as HTMLElement;
-                        return detailsPanel && detailsPanel.innerHTML.includes(jobId) &&
-                            description && description.innerText.length > 0;
+                        if (!description) return false;
+                        return !!(detailsPanel.innerHTML.includes(jobId) && description.innerText);
                     },
                     jobId,
                     selectors.detailsPanel,
                     selectors.description,
                 );
-
-                if (loaded) {
-                    return { success: true };
-                }
-
+                if (loaded) return { success: true };
                 await sleep(pollingTime);
                 elapsed += pollingTime;
             }
         }
-        catch (err) {}
+        catch (_err) {}
 
         return {
             success: false,
@@ -347,24 +343,18 @@ export class AuthenticatedStrategy extends RunStrategy {
         query: IQuery,
         location: string,
     ): Promise<IRunStrategyResult> => {
+        const options = query.options || {};
         let tag = `[${query.query}][${location}]`;
 
-        const metrics: IMetrics = {
-            processed: 0,
-            failed: 0,
-            missed: 0,
-            skipped: 0,
-        };
+        const metrics: IMetrics = { processed: 0, failed: 0, missed: 0, skipped: 0};
 
-        let paginationIndex = query.options?.pageOffset || 0;
+        let paginationIndex = options.pageOffset || 0;
         let paginationSize = 25;
 
         // Navigate to home page
         logger.debug(tag, "Opening", urls.home);
 
-        await page.goto(urls.home, {
-            waitUntil: 'load',
-        });
+        await page.goto(urls.home, {waitUntil: 'load'});
 
         // Set cookie
         logger.info("Setting authentication cookie");
@@ -382,9 +372,7 @@ export class AuthenticatedStrategy extends RunStrategy {
         // Open search url
         logger.info(tag, "Opening", url);
 
-        await page.goto(url, {
-            waitUntil: 'load',
-        });
+        await page.goto(url, {waitUntil: 'load'});
 
         // Verify session
         if (!(await AuthenticatedStrategy._isAuthenticatedSession(page))) {
@@ -396,13 +384,13 @@ export class AuthenticatedStrategy extends RunStrategy {
         try {
             await page.waitForSelector(selectors.container, { timeout: 5000 });
         }
-        catch(err: any) {
+        catch(_err: unknown) {
             logger.info(tag, `No jobs found, skip`);
             return { exit: false };
         }
 
         // Pagination loop
-        while (metrics.processed < query.options!.limit!) {
+        while (metrics.processed < options.limit!) {
             // Verify session in the loop
             if (!(await AuthenticatedStrategy._isAuthenticatedSession(page))) {
                 logger.warn(tag, "Session is invalid, this may cause the scraper to fail.");
@@ -430,14 +418,14 @@ export class AuthenticatedStrategy extends RunStrategy {
             }
 
             // Jobs loop
-            while (jobIndex < jobsTot && metrics.processed < query.options!.limit!) {
+            while (jobIndex < jobsTot && metrics.processed < options.limit!) {
                 tag = `[${query.query}][${location}][${paginationIndex * paginationSize + jobIndex + 1}]`;
 
                 const data: IData = {
                     query: query.query || '',
                     location,
                     jobId: '',
-                    jobIndex, // Job index during search, only useful for debug
+                    jobIndex,
                     link: '',
                     title: '',
                     company: '',
@@ -450,21 +438,16 @@ export class AuthenticatedStrategy extends RunStrategy {
 
                 try {
                     // Extract job main fields
-                    logger.debug(tag, 'Evaluating selectors', [
-                        selectors.jobs,
-                        selectors.link,
-                        selectors.title,
-                        selectors.company,
-                        selectors.place,
-                        selectors.date,
-                    ]);
-
+                    {
+                        const {jobs, link, title, company, place, date} = selectors;
+                        logger.debug(tag, 'Evaluating selectors', [ jobs, link, title, company, place, date ]);
+                    }
                     const jobFieldsResult = await page.evaluate(
                         (
                             jobsSelector: string,
                             linkSelector: string,
                             titleSelector: string,
-                            companySelector: string,
+                            companySelectors: string[],
                             placeSelector: string,
                             dateSelector: string,
                             jobIndex: number
@@ -482,42 +465,33 @@ export class AuthenticatedStrategy extends RunStrategy {
                             const jobLink = protocol + hostname + link.getAttribute("href");
 
                             const jobId = job.getAttribute("data-job-id");
+                            const titleSelected = job.querySelector(titleSelector) as HTMLElement;
 
-                            const title = job.querySelector(titleSelector) ?
-                                (<HTMLElement>job.querySelector(titleSelector)).innerText : "";
+                            const title = titleSelected ? titleSelected.innerText : "";
 
                             let company = "";
                             let companyLink = undefined;
 
-                            if (job.querySelector(companySelector)) {
-                                let companyElem = job.querySelector<HTMLElement>(companySelector)!;
-                                company = companyElem.innerText;
-                                companyLink = companyElem.getAttribute("href") ?
-                                    `${protocol}${hostname}${companyElem.getAttribute("href")}` : undefined;
+                            for (const companySelector of companySelectors) {
+                                const companyElem = job.querySelector<HTMLElement>(companySelector);
+                                if (companyElem) {
+                                    company = companyElem.innerText;
+                                    const href = companyElem.getAttribute("href");
+                                    companyLink = href ? `${protocol}${hostname}${href}` : undefined;
+                                }
                             }
 
                             const companyImgLink = (<HTMLElement>job.querySelector("img"))?.getAttribute("src") ?? undefined;
 
-                            const place = job.querySelector(placeSelector) ?
-                                (<HTMLElement>job.querySelector(placeSelector)).innerText : "";
+                            const placeSelected = job.querySelector(placeSelector) as HTMLElement;
+                            const place = placeSelected ? placeSelected.innerText : "";
 
-                            const date = job.querySelector(dateSelector) ?
-                                (<HTMLElement>job.querySelector(dateSelector)).getAttribute('datetime') : "";
-
+                            const dateSelected = job.querySelector(dateSelector) as HTMLElement;
+                            const date = dateSelected ? dateSelected.getAttribute('datetime') : "";
                             const isPromoted = !!(Array.from(job.querySelectorAll('li'))
                                 .find(e => e.innerText === 'Promoted'));
 
-                            return {
-                                jobId,
-                                jobLink,
-                                title,
-                                company,
-                                companyLink,
-                                companyImgLink,
-                                place,
-                                date,
-                                isPromoted,
-                            };
+                            return { jobId, jobLink, title, company, companyLink, companyImgLink, place, date, isPromoted };
                         },
                         selectors.jobs,
                         selectors.link,
@@ -538,12 +512,12 @@ export class AuthenticatedStrategy extends RunStrategy {
                     let jobIsPromoted = jobFieldsResult.isPromoted;
 
                     // Promoted job
-                    if (query.options?.skipPromotedJobs && jobIsPromoted) {
+                    if (options.skipPromotedJobs && jobIsPromoted) {
                         logger.info(tag, 'Skipped because promoted');
                         metrics.skipped += 1;
                         jobIndex += 1;
 
-                        if (metrics.processed < query.options!.limit! && jobIndex === jobsTot && jobsTot < paginationSize) {
+                        if (metrics.processed < options.limit! && jobIndex === jobsTot && jobsTot < paginationSize) {
                             const loadJobsResult = await AuthenticatedStrategy._loadJobs(page, jobsTot);
 
                             if (loadJobsResult.success) {
@@ -560,9 +534,7 @@ export class AuthenticatedStrategy extends RunStrategy {
                     }
 
                     // Try to load job details and extract job link
-                    logger.debug(tag, 'Evaluating selectors', [
-                        selectors.jobs,
-                    ]);
+                    logger.debug(tag, 'Evaluating selectors', [selectors.jobs]);
 
                     const loadDetailsResult = await AuthenticatedStrategy._loadJobDetails(page, data.jobId!);
 
@@ -574,21 +546,16 @@ export class AuthenticatedStrategy extends RunStrategy {
                     }
 
                     // Use custom description function if available
-                    logger.debug(tag, 'Evaluating selectors', [
-                        selectors.description,
-                    ]);
+                    logger.debug(tag, 'Evaluating selectors', [ selectors.description ]);
 
-                    if (query.options?.descriptionFn) {
-                        const jobDescription = page.evaluate(`(${query.options.descriptionFn.toString()})();`);
-                        const jobDescriptionHTML = page.evaluate((selector) => {
-                                return (<HTMLElement>document.querySelector(selector)).outerHTML;
-                            }, selectors.description);
+                    if (options.descriptionFn) {
+                        const jobDescription = page.evaluate(`(${options.descriptionFn.toString()})();`);
+                        const jobDescriptionHTML = page.evaluate((selector) => (document.querySelector(selector)!).outerHTML, selectors.description);
                         data.description = (await jobDescription) as string;
                         data.descriptionHTML = await jobDescriptionHTML;
-                    }
-                    else {
+                    } else {
                         const [jobDescription, jobDescriptionHTML] = await page.evaluate((selector) => {
-                                const el = (<HTMLElement>document.querySelector(selector));
+                                const el = document.querySelector(selector) as HTMLElement;
                                 return [el.innerText, el.outerHTML];
                             },
                             selectors.description
@@ -597,6 +564,21 @@ export class AuthenticatedStrategy extends RunStrategy {
                         data.descriptionHTML = jobDescriptionHTML;
                     }
 
+                    // LinkedIn sometimes returns a job without a date on the side panel
+                    if (!data.date) {
+                        const agoText = await page.evaluate((selector) => {
+                            const el = document.querySelector(selector) as HTMLElement;
+                            return (el.innerText || '').trim();
+                        }, selectors.dateAgo);
+                        if (agoText) {
+                            try {
+                                data.date = convertToDateString(agoText);
+                            } catch (err) {
+                                logger.warn(tag, `Failed to parse secondary date: ${agoText}`, err);
+                            }
+                        }
+                    }
+ 
                     // Extract job insights
                     logger.debug(tag, 'Evaluating selectors', [
                         selectors.insights,
@@ -609,7 +591,7 @@ export class AuthenticatedStrategy extends RunStrategy {
                     }, selectors.insights);
 
                     // Apply link
-                    if (query.options?.applyLink) {
+                    if (options.applyLink) {
                         const applyLinkRes = await AuthenticatedStrategy._extractApplyLink(page, cdpSession, tag);
 
                         if (applyLinkRes.success) {
@@ -633,7 +615,7 @@ export class AuthenticatedStrategy extends RunStrategy {
                 logger.info(tag, `Processed`);
 
                 // Try fetching more jobs
-                if (metrics.processed < query.options!.limit! && jobIndex === jobsTot && jobsTot < paginationSize) {
+                if (metrics.processed < options.limit! && jobIndex === jobsTot && jobsTot < paginationSize) {
                     const loadJobsResult = await AuthenticatedStrategy._loadJobs(page, jobsTot);
 
                     if (loadJobsResult.success) {
@@ -651,7 +633,7 @@ export class AuthenticatedStrategy extends RunStrategy {
             logger.info(tag, 'No more jobs to process in this page');
 
             // Check if we reached the limit of jobs to process
-            if (metrics.processed === query.options!.limit!) {
+            if (metrics.processed === options.limit!) {
                 logger.info(tag, 'Query limit reached!')
 
                 // Emit metrics
