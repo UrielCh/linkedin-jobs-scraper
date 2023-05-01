@@ -90,58 +90,42 @@ class LinkedinScraper extends Scraper {
      * @returns {string}
      * @private
      */
-    private _buildSearchUrl = (query: string, location: string, options: IQueryOptions): string => {
+    private _buildSearchUrl = (query: string, location: string, options: IQueryOptions= {}): string => {
         const url = new URL(urls.jobsSearch);
-
-        if (query && query.length) {
-            url.searchParams.append("keywords", query);
+        const { searchParams } = url;
+        if (query) {
+            searchParams.append("keywords", query);
         }
-
-        if (location && location.length) {
-            url.searchParams.append("location", location);
+        if (location) {
+            searchParams.append("location", location);
         }
-
-        if (options && options.filters) {
-            if (options.filters.companyJobsUrl) {
-                const queryParams = getQueryParams(options.filters.companyJobsUrl);
-                url.searchParams.append("f_C", queryParams["f_C"]);
+        const { filters } = options;
+        if (filters) {
+            const {companyJobsUrl, relevance, time, type, experience, onSiteOrRemote} = filters;
+            if (companyJobsUrl) {
+                const queryParams = getQueryParams(companyJobsUrl);
+                searchParams.append("f_C", queryParams["f_C"]);
             }
-
-            if (options.filters.relevance) {
-                url.searchParams.append("sortBy", options.filters.relevance);
+            if (relevance) {
+                searchParams.append("sortBy", relevance);
             }
-
-            if (options.filters.time && options.filters.time.length) {
-                url.searchParams.append("f_TPR", options.filters.time);
+            if (time) {
+                url.searchParams.append("f_TPR", time);
             }
-
-            if (options.filters.type) {
-                if (!Array.isArray(options.filters.type)) {
-                    options.filters.type = [options.filters.type]
-                }
-
-                url.searchParams.append("f_JT", options.filters.type.join(","));
+            if (type) {
+                const queryParams = (typeof type === 'string')? type : type.join(",");
+                searchParams.append("f_JT", queryParams);
             }
-
-            if (options.filters.experience) {
-                if (!Array.isArray(options.filters.experience)) {
-                    options.filters.experience = [options.filters.experience]
-                }
-
-                url.searchParams.append("f_E", options.filters.experience.join(","));
+            if (experience) {
+                const queryParams = (typeof experience === 'string')? experience : experience.join(",");
+                searchParams.append("f_E", queryParams);
             }
-
-            if (options.filters.onSiteOrRemote) {
-                if (!Array.isArray(options.filters.onSiteOrRemote)) {
-                    options.filters.onSiteOrRemote = [options.filters.onSiteOrRemote]
-                }
-
-                url.searchParams.append("f_WT", options.filters.onSiteOrRemote.join(","));
+            if (onSiteOrRemote) {
+                const queryParams = (typeof onSiteOrRemote === 'string')? onSiteOrRemote : onSiteOrRemote.join(",");
+                searchParams.append("f_WT", queryParams);
             }
         }
-
-        url.searchParams.append("start", "0");
-
+        searchParams.append("start", "0");
         return url.href;
     }
 
