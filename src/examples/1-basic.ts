@@ -33,10 +33,10 @@ import {
     scraper.on(events.scraper.end, () => { console.log("E N D (ツ)_.\\m/") });
 
     // Add listeners for puppeteer specific browser events
-    scraper.on(events.puppeteer.browser.targetcreated, () => { });
-    scraper.on(events.puppeteer.browser.targetchanged, () => { });
-    scraper.on(events.puppeteer.browser.targetdestroyed, () => { });
-    scraper.on(events.puppeteer.browser.disconnected, () => { });
+    scraper.on(events.puppeteer.browser.targetcreated, () => { /* empty */ });
+    scraper.on(events.puppeteer.browser.targetchanged, () => { /* empty */ });
+    scraper.on(events.puppeteer.browser.targetdestroyed, () => { /* empty */ });
+    scraper.on(events.puppeteer.browser.disconnected, () => { /* empty */ });
 
     await scraper.run({
         query: "Graphic Designer",
