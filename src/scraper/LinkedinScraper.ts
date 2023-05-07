@@ -13,37 +13,44 @@ import { getRandomUserAgent } from '../utils/browser';
 import { Scraper, ScraperOptions } from './Scraper';
 import { RunStrategy, AuthenticatedStrategy } from './strategies';
 import { logger } from '../logger/logger';
+import { JobStorage } from '../utils/JobStore';
 
 // puppeteer.use(require('puppeteer-extra-plugin-stealth')()); // TODO: breaks with new target tabs: to investigate
 
 /**
  * Main class
  * @extends EventEmitter
- * @param options {ScraperOptions} Puppeteer browser options, for more informations see 
+ * @param options {ScraperOptions} Puppeteer browser options, for more informations see
  * https://pptr.dev/#?product=Puppeteer&version=v2.0.0&show=api-puppeteerlaunchoptions
  * @constructor
  */
 class LinkedinScraper extends Scraper {
   private _runStrategy: RunStrategy;
-  private _browser: Browser | undefined = undefined;
-  private _context: BrowserContext | undefined = undefined;
+  private _browser: Browser | undefined;
+  private _context!: BrowserContext;
   private _state = states.notInitialized;
-
+  public jobStorage?: JobStorage;
   /**
    * @constructor
    * @param {ScraperOptions} options
    */
   constructor(options: ScraperOptions) {
     super(options);
+    this.jobStorage = options.jobStorage;
 
-    if (config.LI_AT_COOKIE) {
+    if (config.LI_AT_COOKIE || this.isExistingBrower) {
       this._runStrategy = new AuthenticatedStrategy(this);
       logger.info(`Env variable LI_AT_COOKIE detected. Using ${AuthenticatedStrategy.name}`);
     } else {
-        throw new Error("AnonymousStrategy Removed");
+      throw new Error('AnonymousStrategy Removed');
       // this._runStrategy = new AnonymousStrategy(this);
       // logger.info(`Using ${AnonymousStrategy.name}`);
     }
+  }
+
+
+  public get isExistingBrower(): boolean {
+    return !!(this.options.browserURL || this.options.browserWSEndpoint);
   }
 
   /**
@@ -52,34 +59,36 @@ class LinkedinScraper extends Scraper {
    */
   private async _initialize() {
     this._state = states.initializing;
-
-    this._browser && this._browser.removeAllListeners();
-
-    const launchOptions = deepmerge.all([browserDefaults, this.options]);
+    if (this._browser) {
+        this._browser.removeAllListeners();
+        this._browser = undefined;
+    }
+    const launchOptions = deepmerge.all<ScraperOptions>([browserDefaults, this.options]);
     logger.info('Setting chrome launch options', launchOptions);
-    this._browser = await puppeteer.launch(launchOptions);
-
+    if (this.isExistingBrower) {
+      this._browser = await puppeteer.connect(launchOptions);
+    } else {
+      this._browser = await puppeteer.launch(launchOptions);
+    }
     // Close initial browser page
     // await (await this._browser.pages())[0].close();
-
-    this._context = await this._browser.createIncognitoBrowserContext();
+    if (this.isExistingBrower)
+      this._context = this._browser.defaultBrowserContext();
+    else
+      this._context = await this._browser.createIncognitoBrowserContext();
 
     this._browser.on(events.puppeteer.browser.disconnected, () => {
       this.emit(events.puppeteer.browser.disconnected);
     });
-
     this._browser.on(events.puppeteer.browser.targetcreated, () => {
       this.emit(events.puppeteer.browser.targetcreated);
     });
-
     this._browser.on(events.puppeteer.browser.targetchanged, () => {
       this.emit(events.puppeteer.browser.targetchanged);
     });
-
     this._browser.on(events.puppeteer.browser.targetdestroyed, () => {
       this.emit(events.puppeteer.browser.targetdestroyed);
     });
-
     this._state = states.initialized;
   }
 
@@ -150,7 +159,7 @@ class LinkedinScraper extends Scraper {
       options && optionsToMerge.push(options);
       query.options && optionsToMerge.push(query.options);
       query.options = deepmerge.all(optionsToMerge, {
-        arrayMerge: (destinationArray, sourceArray, options) => sourceArray,
+        arrayMerge: (destinationArray, sourceArray) => sourceArray,
       });
 
       // Add default location if none provided
@@ -171,8 +180,7 @@ class LinkedinScraper extends Scraper {
       await this._initialize();
     }
     const _browser = this._browser;
-    if (!_browser)
-        throw new Error("Assertion failed: _browser");
+    if (!_browser) throw new Error('Assertion failed: _browser');
 
     const wsEndpoint = _browser.wsEndpoint();
 
@@ -182,18 +190,19 @@ class LinkedinScraper extends Scraper {
 
     // Queries loop
     for (const query of queries) {
-      if (query.options?.optimize) {
+      const options = query.options || {};
+      if (options.optimize) {
         logger.warn('Query option optimize=true: this could cause issues in jobs loading or pagination');
       }
 
       // Locations loop
-      for (const location of query.options!.locations!) {
+      for (const location of options.locations || []) {
         tag = `[${query.query}][${location}]`;
         logger.info(tag, `Starting new query:`, `query="${query.query}"`, `location="${location}"`);
         logger.info(tag, `Query options`, query.options);
 
         // Open new page in incognito context
-        const page = await this._context!.newPage();
+        const page = await this._context.newPage();
 
         // Create Chrome Developer Tools session
         const cdpSession = await page.target().createCDPSession();
@@ -208,7 +217,8 @@ class LinkedinScraper extends Scraper {
         });
 
         // Set a random user agent
-        await page.setUserAgent(getRandomUserAgent());
+        if (!this.isExistingBrower)
+          await page.setUserAgent(getRandomUserAgent());
 
         // Enable request interception
         await page.setRequestInterception(true);
@@ -236,7 +246,7 @@ class LinkedinScraper extends Scraper {
           }
 
           // If optimization is enabled, block other resource types
-          if (query.options!.optimize) {
+          if (options.optimize) {
             const resourcesToBlock = ['image', 'stylesheet', 'media', 'font', 'imageset'];
 
             if (
@@ -270,10 +280,10 @@ class LinkedinScraper extends Scraper {
         });
 
         // Build search url
-        const searchUrl = this._buildSearchUrl(query.query || '', location, query.options!);
+        const searchUrl = this._buildSearchUrl(query.query || '', location, query.options);
 
         // Run strategy
-        const runStrategyResult = await this._runStrategy.run(this._context!, page, cdpSession, searchUrl, query, location);
+        const runStrategyResult = await this._runStrategy.run(this._context, page, cdpSession, searchUrl, query, location);
 
         // Check if forced exit is required
         if (runStrategyResult.exit) {
@@ -316,9 +326,9 @@ class LinkedinScraper extends Scraper {
       }
 
       await this._run(queries, options);
-    } catch (err: any) {
+    } catch (err) {
       // logger.error(err);
-      this.emit(events.scraper.error, err);
+      this.emit(events.scraper.error, err as Error);
       await this.close();
       throw err;
     }
@@ -331,7 +341,9 @@ class LinkedinScraper extends Scraper {
   public close = async (): Promise<void> => {
     try {
       if (this._browser) {
-        this._browser.removeAllListeners() && (await this._browser.close());
+        if (this._browser.removeAllListeners() && !this.isExistingBrower) {
+            await this._browser.close()
+        }
       }
     } finally {
       this._browser = undefined;

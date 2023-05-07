@@ -7,6 +7,7 @@ import { IQuery } from '../query';
 import { logger } from '../../logger/logger';
 import { urls } from '../constants';
 import { jobSummery } from './common';
+import { LinkedinScraper } from '../LinkedinScraper';
 
 export const selectors = {
   container: '.jobs-search-results-list',
@@ -35,6 +36,10 @@ export const selectors = {
  * @extends RunStrategy
  */
 export class AuthenticatedStrategy extends RunStrategy {
+  constructor(scraper: LinkedinScraper) {
+    super(scraper);
+  }
+
   /**
    * Check if session is authenticated
    * @param {Page} page
@@ -330,16 +335,17 @@ export class AuthenticatedStrategy extends RunStrategy {
 
     await page.goto(urls.home, { waitUntil: 'load' });
 
-    const { LI_AT_COOKIE } = config;
-    if (!LI_AT_COOKIE) throw new Error('LI_AT_COOKIE is not defined');
-    // Set cookie
-    logger.info('Setting authentication cookie');
-    await page.setCookie({
-      name: 'li_at',
-      value: LI_AT_COOKIE,
-      domain: '.www.linkedin.com',
-    });
-
+    if (!this.scraper.isExistingBrower) {
+      const { LI_AT_COOKIE } = config;
+      if (!LI_AT_COOKIE) throw new Error('LI_AT_COOKIE is not defined');
+      // Set cookie
+      logger.info('Setting authentication cookie');
+      await page.setCookie({
+        name: 'li_at',
+        value: LI_AT_COOKIE,
+        domain: '.www.linkedin.com',
+      });
+    }
     // Override start by the page offset
     const _url = new URL(url);
     _url.searchParams.set('start', `${paginationIndex * paginationSize}`);
@@ -378,7 +384,7 @@ export class AuthenticatedStrategy extends RunStrategy {
       await AuthenticatedStrategy._acceptPrivacy(page, tag);
 
       // Get number of all job links in the page
-      const summerys = await jobSummery(page);
+      let summerys = await jobSummery(page);
       let jobsTot = summerys.length;
       if (jobsTot === 0) {
         logger.info(tag, `No jobs found, skip`);
@@ -388,6 +394,8 @@ export class AuthenticatedStrategy extends RunStrategy {
       // Jobs loop
       let jobIndex = 0;
       const limit = options.limit || 100;
+      const jobStorage = this.scraper.jobStorage;
+      
       while (jobIndex < jobsTot && metrics.processed < limit) {
         tag = `[${query.query}][${location}][${paginationIndex * paginationSize + jobIndex + 1}]`;
 
@@ -405,8 +413,20 @@ export class AuthenticatedStrategy extends RunStrategy {
             }
           }
         };
+        let summery = summerys[jobIndex];
+        if (!summery) {
+          await summerys[summerys.length - 1].updateDetails(page);
+          // scroll to the last job
+          summerys = await jobSummery(page);
+          summery = summerys[jobIndex];
+        }
+        if (jobStorage) {
+          if (await jobStorage.contains(summery.jobId)) {
+            donePass();
+            continue;
+          }
+        }
 
-        const summery = summerys[jobIndex];
         if (options.skipPromotedJobs && summery.isPromoted) {
           logger.info(tag, 'Skipped because promoted');
           metrics.skipped += 1;

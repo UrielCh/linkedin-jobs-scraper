@@ -1,15 +1,15 @@
 import { BrowserContext, Page, CDPSession } from "puppeteer";
-import { Scraper } from "../Scraper";
 import { IQuery } from "../query";
+import { LinkedinScraper } from "../LinkedinScraper";
 
 export interface IRunStrategyResult {
     exit: boolean;
 }
 
 export abstract class RunStrategy {
-    protected scraper: Scraper;
+    protected scraper: LinkedinScraper;
 
-    constructor(scraper: Scraper) {
+    constructor(scraper: LinkedinScraper) {
         this.scraper = scraper;
     }
 
