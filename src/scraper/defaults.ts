@@ -27,7 +27,6 @@ const browserDefaults: ScraperOptions = {
         "--disable-notifications",
         "--mute-audio",
     ],
-    // @ts-ignore
     defaultViewport: null,
     pipe: true,
     slowMo: 150,

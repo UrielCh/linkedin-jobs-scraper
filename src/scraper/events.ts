@@ -21,44 +21,6 @@ type BrowserEvent =
     isEasyApply: boolean,
 }
 
-// export class IData {
-//   query: string;
-//   location: string;
-//   jobId: string = '';
-//   jobIndex: number = 0; // Job index during search, only useful for debug
-//   link: string = '';
-//   applyLink?: string;
-//   title: string = '';
-//   company: string = '';
-//   companyLink?: string;
-//   companyImgLink?: string;
-//   place: string = '';
-//   date: string = '';
-//   description: string = '';
-//   descriptionHTML: string = '';
-//   insights: string[] = [];
-//   jobIsPromoted = false;
-//   isEasyApply = false;
-// 
-//   constructor(query?: string, location?: string) {
-//     this.query = query || "";
-//     this.location = location || "";
-//   }
-// 
-//   importJobData(dataset: Step1Ret) {
-//     this.jobId = dataset.jobId || "";
-//     this.link = dataset.jobLink;
-//     this.title = dataset.title;
-//     this.company = dataset.company;
-//     this.companyLink = dataset.companyLink;
-//     this.companyImgLink = dataset.companyImgLink;
-//     this.place = dataset.place;
-//     this.date = dataset.date || "";
-//     this.jobIsPromoted = dataset.isPromoted;
-//     this.isEasyApply = dataset.isEasyApply || false;
-//   }
-// }
-
 export interface IMetrics {
   processed: number; // Number of successfully processed jobs
   failed: number; // Number of jobs failed to process (because of an error)
