@@ -1,36 +1,36 @@
 export const relevanceFilter = {
-    RELEVANT: "R",
-    RECENT: "DD",
-}
+    RELEVANT: "R" as const,
+    RECENT: "DD" as const,
+} as const;
 
 export const timeFilter = {
-    ANY: "",
-    DAY: "r86400",
-    WEEK: "r604800",
-    MONTH: "r2592000",
+    ANY: "" as const,
+    DAY: "r86400" as const,
+    WEEK: "r604800" as const,
+    MONTH: "r2592000" as const,
 }
 
 export const typeFilter = {
-    FULL_TIME: "F",
-    PART_TIME: "P",
-    TEMPORARY: "T",
-    CONTRACT: "C",
-    INTERNSHIP: "I",
-    VOLUNTEER: "V",
-    OTHER: "O",
+    FULL_TIME: "F" as const,
+    PART_TIME: "P" as const,
+    TEMPORARY: "T" as const,
+    CONTRACT: "C" as const,
+    INTERNSHIP: "I" as const,
+    VOLUNTEER: "V" as const,
+    OTHER: "O" as const,
 }
 
 export const experienceLevelFilter = {
-    INTERNSHIP: "1",
-    ENTRY_LEVEL: "2",
-    ASSOCIATE: "3",
-    MID_SENIOR: "4",
-    DIRECTOR: "5",
-    EXECUTIVE: "6",
+    INTERNSHIP: "1" as const,
+    ENTRY_LEVEL: "2" as const,
+    ASSOCIATE: "3" as const,
+    MID_SENIOR: "4" as const,
+    DIRECTOR: "5" as const,
+    EXECUTIVE: "6" as const,
 }
 
 export const onSiteOrRemoteFilter = {
-    ON_SITE: "1",
-    REMOTE: "2",
-    HYBRID: "3",
+    ON_SITE: "1" as const,
+    REMOTE: "2" as const,
+    HYBRID: "3" as const,
 }

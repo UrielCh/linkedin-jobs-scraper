@@ -8,7 +8,7 @@ import { browserDefaults, queryOptionsDefault } from './defaults';
 import { sleep } from '../utils/utils';
 import { getQueryParams } from '../utils/url';
 import { urls } from './constants';
-import { IQuery, IQueryOptions, validateQuery } from './query';
+import { IQuery, IQueryOptions, QuerySchema } from './query';
 import { getRandomUserAgent } from '../utils/browser';
 import { Scraper, ScraperOptions } from './Scraper';
 import { RunStrategy, AuthenticatedStrategy } from './strategies';
@@ -166,13 +166,8 @@ class LinkedinScraper extends Scraper {
       if (!query?.options?.locations?.length) {
         query.options.locations = ['Worldwide'];
       }
-
-      const errors = validateQuery(query);
-
-      if (errors.length) {
-        logger.error(errors);
-        process.exit(1);
-      }
+      //query = 
+      QuerySchema.parse(query);
     }
 
     // Initialize browser
